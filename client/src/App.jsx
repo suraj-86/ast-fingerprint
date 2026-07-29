@@ -26,7 +26,7 @@ function App() {
     formData.append('fileB', fileB);
 
     try {
-      const response = await fetch('http://localhost:5000/api/scan', {
+      const response = await fetch('https://ast-fingerprint-api.onrender.com/api/scan', {
         method: 'POST',
         body: formData,
       });
