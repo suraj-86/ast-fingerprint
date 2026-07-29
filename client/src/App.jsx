@@ -85,6 +85,9 @@ function App() {
             <option value="typescript">TypeScript</option>
             <option value="python">Python</option>
             <option value="css">CSS</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+            <option value="java">Java</option>
           </select>
         </div>
 

@@ -2,24 +2,27 @@ import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
 import Parser from 'tree-sitter';
-
-// --- 1. IMPORT CORE LANGUAGE BINDINGS ---
 import JavaScript from 'tree-sitter-javascript';
+import TypeScript from 'tree-sitter-typescript';
 import Python from 'tree-sitter-python';
-import tsPkg from 'tree-sitter-typescript';
-import CSS from 'tree-sitter-css';
-
-const TypeScript = tsPkg.typescript || tsPkg;
+import Css from 'tree-sitter-css';
+import C from 'tree-sitter-c';
+import Cpp from 'tree-sitter-cpp';
+import Java from 'tree-sitter-java';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
-// --- 2. CORE LANGUAGE MAP ---
+// --- MAP LANGUAGE PARSERS ---
 const languageMap = {
     'javascript': JavaScript,
+    'typescript': TypeScript.typescript,
     'python': Python,
-    'typescript': TypeScript,
-    'css': CSS
+    'css': Css,
+    'c': C,
+    'cpp': Cpp,
+    'java': Java
 };
 
 // --- 3. CONFIGURE MULTER ---
@@ -86,7 +89,10 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
             'javascript': ['.js', '.jsx'],
             'typescript': ['.ts', '.tsx'],
             'python': ['.py'],
-            'css': ['.css']
+            'css': ['.css'],
+            'c': ['.c', '.h'],
+            'cpp': ['.cpp', '.cc', '.cxx', '.hpp'],
+            'java': ['.java']
         };
 
         const expectedExtensions = extensionMap[reqLang];
