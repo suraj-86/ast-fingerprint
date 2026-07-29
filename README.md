@@ -54,8 +54,8 @@ ast-fingerprint/
 
 ## 🌐 Live Demo & Deployment
 
-* **Frontend Client:** [https://ast-fingerprint.vercel.app](https://ast-fingerprint.vercel.app) *(Update with your exact Vercel link)*
-* **Backend API Service:** [https://ast-fingerprint-api.onrender.com](https://ast-fingerprint-api.onrender.com)
+* **Frontend Client:** [https://ast-fingerprint.vercel.app](https://ast-fingerprint.vercel.app)
+* **Backend API Service:** on RENDER
 
 ---
 
