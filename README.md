@@ -1,17 +1,23 @@
-# AST-Fingerprint
-
-**An Algorithmic Source Code Plagiarism Detection System using Abstract Syntax Trees, Depth-First Traversal, and N-Gram Hashing.**
+# AST-Fingerprint v2.0
+An Algorithmic Source Code Plagiarism Detection System using Abstract Syntax Trees, Depth-First Traversal, and N-Gram Hashing.
 
 ## 📖 Project Vision
-With the increasing scale of computer science education, traditional text-based plagiarism detectors (Type-1 clones) are easily circumvented by basic variable renaming or formatting changes. **AST-Fingerprint** evaluates the foundational logical structure of source code rather than its cosmetic syntax. By analyzing the "skeletal" control flow using Abstract Syntax Trees (ASTs), this system provides a mathematically verifiable metric of structural similarity to detect Type-2 and Type-3 code clones.
 
-## 🚀 Features
-*   **Structural Analysis:** Ignores variable renaming, whitespace, formatting, and comments mathematically.
-*   **Multi-Language Engine Support:** Seamlessly analyzes code structures across JavaScript, TypeScript, Python, and CSS.
-*   **Strict Input Validation:** Cross-references file extensions with selected parser engines to prevent runtime parsing faults.
-*   **Tamper-Resistant N-Gram Hashing:** Utilizes sliding windows over DFS node traversals to detect gapped clones and code reordering.
-*   **In-Memory Processing:** Leverages Express and Multer to process files entirely in RAM, eliminating disk I/O bottlenecks.
-*   **Modern SaaS Dashboard:** High-end glassmorphism UI built with React.js and Vite for dynamic score visualization.
+With the increasing scale of computer science education, traditional text-based plagiarism detectors (Type-1 clones) are easily circumvented by basic variable renaming or formatting changes. **AST-Fingerprint** evaluates the foundational logical structure of source code rather than its cosmetic syntax. By analyzing the "skeletal" control flow using Abstract Syntax Trees (ASTs), this system provides a mathematically verifiable metric of structural similarity to detect Type-2 and Type-3 code clones.  
+
+---
+## 🚀 Version 2.0 Features
+
+* **Structural Analysis:** Ignores variable renaming, whitespace, formatting, and comments mathematically.  
+* **Multi-Language Engine Support:** Seamlessly analyzes code structures across JavaScript, TypeScript, Python, CSS, C, C++, and Java.
+* **Interactive Side-by-Side Code Diff Viewer:** Powered by Microsoft's Monaco Editor (`@monaco-editor/react`), allowing auditors to inspect structural line-by-line code matches visually.
+* **Downloadable Official PDF Audit Reports:** Generates professional in-memory PDF summary reports containing similarity scores, N-gram metrics, and file metadata for academic records.
+* **Strict Input Validation:** Cross-references file extensions with selected parser engines to prevent runtime parsing faults.  
+* **Tamper-Resistant N-Gram Hashing:** Utilizes sliding windows over DFS node traversals to detect gapped clones and code reordering.  
+* **In-Memory Processing:** Leverages Express and Multer to process files entirely in RAM, eliminating disk I/O bottlenecks.  
+* **Modern SaaS Dashboard:** High-end glassmorphism UI built with React.js and Vite.  
+
+---
 
 ## 🛠️ Technology Stack
 | Component | Technology | Purpose |
