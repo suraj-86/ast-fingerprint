@@ -42,6 +42,8 @@ ast-fingerprint/
 ├── .gitignore                # Git exclusion rules
 └── README.md                 # Project documentation
 
+```
+
 # AST Fingerprint & Code Plagiarism Detection System
 
 > **Academic Minor Project — 2026**  
