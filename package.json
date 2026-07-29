@@ -12,6 +12,7 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "multer": "^2.2.0",
+    "pdfkit": "^0.19.1",
     "tree-sitter": "^0.25.1",
     "tree-sitter-bash": "^0.25.1",
     "tree-sitter-c": "^0.24.1",

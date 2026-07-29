@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DiffEditor } from '@monaco-editor/react';
 import './App.css';
 
 function App() {
@@ -67,7 +68,7 @@ function App() {
         </div>
       </nav>
 
-      {/* Main Workspace Workspace */}
+      {/* Main Workspace */}
       <main className="main-workspace">
         <div className="workspace-header">
           <h2>Structural Source Code Plagiarism Detector</h2>
@@ -120,19 +121,60 @@ function App() {
         {result && (
           <div className="result-card">
             <div className="result-header">
-              <h3>Analysis Complete</h3>
+              <h3>Plagiarism Analysis Result</h3>
             </div>
+            
             <div className="score-circle">
-              <span className="score-text">{result.similarityScore}%</span>
+              <span className="score-text">{result.similarity}%</span>
             </div>
+            
             <div className="stats-grid">
               <div className="stat-box">
-                <span className="stat-label">Source Nodes (AST)</span>
-                <span className="stat-value">{result.nodesAnalyzedA}</span>
+                <span className="stat-label">Matched N-Grams</span>
+                <span className="stat-value">{result.matchedNgrams}</span>
               </div>
               <div className="stat-box">
-                <span className="stat-label">Suspect Nodes (AST)</span>
-                <span className="stat-value">{result.nodesAnalyzedB}</span>
+                <span className="stat-label">Total N-Grams Universe</span>
+                <span className="stat-value">{result.totalNgrams}</span>
+              </div>
+            </div>
+
+            {/* Download PDF Report Button */}
+            <div style={{ padding: '20px', textAlign: 'center' }}>
+              <a 
+                href={result.pdfReport} 
+                download="AST-Fingerprint-Audit-Report.pdf"
+                style={{
+                  background: '#10b981',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  textDecoration: 'none',
+                  fontWeight: 'bold',
+                  display: 'inline-block',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                📥 Download Official Audit Report (PDF)
+              </a>
+            </div>
+
+            <div className="diff-viewer-wrapper" style={{ padding: '20px', textAlign: 'left' }}>
+              <h4 style={{ color: 'var(--text-main)', marginBottom: '10px', fontSize: '1rem' }}>Structural Code Comparison (Original vs Suspect)</h4>
+              <div style={{ height: '450px', border: '1px solid var(--panel-border)', borderRadius: '12px', overflow: 'hidden' }}>
+                <DiffEditor 
+                  height="100%"
+                  language={language}
+                  original={result.sourceCode}
+                  modified={result.suspectCode}
+                  theme="vs-dark"
+                  options={{
+                    readOnly: true,
+                    automaticLayout: true,
+                    renderSideBySide: true,
+                    minimap: { enabled: false }
+                  }}
+                />
               </div>
             </div>
           </div>

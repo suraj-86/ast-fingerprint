@@ -9,6 +9,7 @@ import Css from 'tree-sitter-css';
 import C from 'tree-sitter-c';
 import Cpp from 'tree-sitter-cpp';
 import Java from 'tree-sitter-java';
+import PDFDocument from 'pdfkit';
 
 const app = express();
 app.use(cors());
@@ -27,13 +28,13 @@ const languageMap = {
 
 // --- 3. CONFIGURE MULTER ---
 const codeFileFilter = (req, file, cb) => {
-    const allowedExtensions = ['.js', '.py', '.ts', '.css'];
+    const allowedExtensions = ['.js', '.jsx', '.ts', '.tsx', '.py', '.css', '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.java'];
     const isAllowed = allowedExtensions.some(ext => file.originalname.toLowerCase().endsWith(ext));
     
     if (isAllowed) {
         cb(null, true); 
     } else {
-        cb(new Error('Invalid file type. Ensure the file matches the selected language.'), false); 
+        cb(new Error('Invalid file type. Ensure the file matches a supported language format.'), false); 
     }
 };
 
@@ -63,7 +64,7 @@ function generateNGrams(nodeTypes, n = 3) {
     return nGrams;
 }
 
-function calculateJaccardSimilarity(setA, setB) {
+function calculateJaccardMetrics(setA, setB) {
     let intersectionCount = 0;
     for (const item of setA) {
         if (setB.has(item)) {
@@ -71,8 +72,13 @@ function calculateJaccardSimilarity(setA, setB) {
         }
     }
     const unionCount = setA.size + setB.size - intersectionCount;
-    if (unionCount === 0) return 1.0; 
-    return intersectionCount / unionCount;
+    const similarity = unionCount === 0 ? 1.0 : intersectionCount / unionCount;
+    
+    return {
+        similarityPercentage: (similarity * 100).toFixed(2),
+        intersectionSize: intersectionCount,
+        unionSize: unionCount
+    };
 }
 
 // --- 5. THE API ENDPOINT ---
@@ -84,7 +90,6 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
     try {
         const reqLang = req.body.language || 'javascript';
         
-        // 1. Define allowed extensions for each language engine
         const extensionMap = {
             'javascript': ['.js', '.jsx'],
             'typescript': ['.ts', '.tsx'],
@@ -97,7 +102,6 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
 
         const expectedExtensions = extensionMap[reqLang];
         
-        // 2. Extract extensions from uploaded files
         const getExtension = (filename) => {
             const parts = filename.split('.');
             return '.' + parts[parts.length - 1].toLowerCase();
@@ -106,7 +110,6 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
         const extA = getExtension(req.files.fileA[0].originalname);
         const extB = getExtension(req.files.fileB[0].originalname);
 
-        // 3. Reject if extensions don't match the selected dropdown language
         if (!expectedExtensions.includes(extA) || !expectedExtensions.includes(extB)) {
             return res.status(400).json({ 
                 error: `Language mismatch! You selected ${reqLang.toUpperCase()}, but uploaded ${extA} and ${extB} files. Please upload ${expectedExtensions.join(' or ')} files.` 
@@ -119,11 +122,11 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
             return res.status(400).json({ error: "Unsupported language selected." });
         }
 
-        const codeA = req.files.fileA[0].buffer.toString('utf-8');
-        const codeB = req.files.fileB[0].buffer.toString('utf-8');
+        const sourceCode = req.files.fileA[0].buffer.toString('utf-8');
+        const suspectCode = req.files.fileB[0].buffer.toString('utf-8');
 
-        const treeA = parser.parse(codeA);
-        const treeB = parser.parse(codeB);
+        const treeA = parser.parse(sourceCode);
+        const treeB = parser.parse(suspectCode);
 
         const flatA = flattenAST(treeA.rootNode);
         const flatB = flattenAST(treeB.rootNode);
@@ -131,15 +134,45 @@ app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fi
         const nGramsA = generateNGrams(flatA, 3);
         const nGramsB = generateNGrams(flatB, 3);
 
-        const score = calculateJaccardSimilarity(nGramsA, nGramsB);
-        const percentage = (score * 100).toFixed(2);
+        const { similarityPercentage, intersectionSize, unionSize } = calculateJaccardMetrics(nGramsA, nGramsB);
 
-        res.json({
-            success: true,
-            similarityScore: parseFloat(percentage),
-            nodesAnalyzedA: flatA.length,
-            nodesAnalyzedB: flatB.length
+        // --- Generate PDF Audit Report in Memory ---
+        const doc = new PDFDocument({ margin: 50 });
+        let buffers = [];
+        
+        doc.on('data', buffers.push.bind(buffers));
+        doc.on('end', () => {
+            let pdfData = Buffer.concat(buffers);
+            let base64Pdf = pdfData.toString('base64');
+
+            res.json({
+                success: true,
+                similarity: similarityPercentage,
+                matchedNgrams: intersectionSize,
+                totalNgrams: unionSize,
+                sourceCode: sourceCode,
+                suspectCode: suspectCode,
+                pdfReport: `data:application/pdf;base64,${base64Pdf}`
+            });
         });
+
+        doc.fontSize(22).fillColor('#10b981').text('AST-Fingerprint Audit Report', { align: 'center' });
+        doc.fontSize(10).fillColor('#666').text(`Generated on: ${new Date().toUTCString()}`, { align: 'center' });
+        doc.moveDown(2);
+
+        doc.fontSize(14).fillColor('#000').text('Plagiarism Analysis Summary');
+        doc.fontSize(11).fillColor('#333');
+        doc.text(`Target Language Engine: ${reqLang.toUpperCase()}`);
+        doc.text(`Similarity Score: ${similarityPercentage}%`);
+        doc.text(`Matched AST N-Grams: ${intersectionSize} / ${unionSize}`);
+        doc.moveDown(2);
+
+        doc.fontSize(14).fillColor('#000').text('File Metadata');
+        doc.fontSize(11).fillColor('#333');
+        doc.text(`Source File: ${req.files.fileA[0].originalname}`);
+        doc.text(`Suspect File: ${req.files.fileB[0].originalname}`);
+        
+        doc.end();
 
     } catch (error) {
         console.error("Scanning Error:", error);
