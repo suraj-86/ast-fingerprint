@@ -9,26 +9,20 @@ import { generatePairReport, generateBatchReport } from './lib/reportGenerator.j
 
 const app = express();
 
-// Render (and most PaaS hosts) sit behind a reverse proxy, so Express needs
-// to trust the X-Forwarded-For header to see the real client IP. Without
-// this, express-rate-limit ends up rate-limiting the proxy, not the caller.
 app.set('trust proxy', 1);
 
 app.use(cors());
 app.use(express.json());
 
 // --- RATE LIMITING ---
-// A relaxed limiter across the whole API to stop basic hammering...
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests from this IP. Please try again later.' },
 });
 
-// ...and a much stricter limiter specifically on the expensive parsing +
-// PDF-generation endpoints, since those are the ones worth protecting.
 const scanLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -39,7 +33,6 @@ const scanLimiter = rateLimit({
 
 app.use('/api', generalLimiter);
 
-// --- MULTER CONFIG ---
 const codeFileFilter = (req, file, cb) => {
   const allAllowedExtensions = Object.values(extensionMap).flat();
   const isAllowed = allAllowedExtensions.some(ext => file.originalname.toLowerCase().endsWith(ext));
@@ -55,12 +48,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: codeFileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB per file
-    files: 30,                 // hard ceiling for batch uploads
+    fileSize: 5 * 1024 * 1024,
+    files: 30,                 
   },
 });
 
-// --- SHARED HELPERS ---
 function getExtension(filename) {
   const parts = filename.split('.');
   return '.' + parts[parts.length - 1].toLowerCase();
@@ -96,14 +88,12 @@ function multerErrorHandler(err, req, res, next) {
   next();
 }
 
-// --- ROUTE: list supported languages (lets the frontend build its dropdown dynamically) ---
 app.get('/api/languages', (req, res) => {
   res.json({
     languages: Object.keys(extensionMap).map((value) => ({ value, label: languageLabels[value] })),
   });
 });
 
-// --- ROUTE: single pair scan (original behaviour, unchanged from the user's point of view) ---
 app.post(
   '/api/scan',
   scanLimiter,
@@ -157,7 +147,6 @@ app.post(
   }
 );
 
-// --- ROUTE: batch scan — all-pairs comparison across N files ---
 app.post(
   '/api/batch-scan',
   scanLimiter,
@@ -175,15 +164,12 @@ app.post(
         return res.status(400).json({ error: validationError });
       }
 
-      // Fingerprint every file exactly once...
       const entries = files.map((file) => {
         const code = file.buffer.toString('utf-8');
         const fp = fingerprintSource(code, reqLang);
         return { name: file.originalname, code, nGrams: fp.nGrams, hasErrors: fp.hasErrors };
       });
 
-      // ...then compare every unique pair (i < j). N files costs
-      // N*(N-1)/2 comparisons rather than parsing anything twice.
       const pairs = [];
       for (let i = 0; i < entries.length; i++) {
         for (let j = i + 1; j < entries.length; j++) {

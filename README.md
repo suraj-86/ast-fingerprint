@@ -71,48 +71,6 @@ ast-fingerprint/
 
 ---
 
-## ⚙️ How to Run Locally
-
-### Prerequisites
-* **Node.js:** v18 or v20 LTS recommended
-* **npm:** Node Package Manager
-
-### Installation & Setup
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/suraj-86/ast-fingerprint.git
-   cd ast-fingerprint
-   ```
-
-2. **Setup and Start the Backend:**
-   ```bash
-   cd backend
-   npm install --legacy-peer-deps
-   node index.js
-   ```
-   *The API server will start on `http://localhost:5000`*
-
-3. **Setup and Start the Frontend:**
-   *(Open a separate terminal window and run)*
-   ```bash
-   cd client
-   npm install
-   npm run dev
-   ```
-   *The Vite development server will start on `http://localhost:5173` and will talk to `http://localhost:5000` by default.*
-
-   To point the frontend at a different backend (e.g. your deployed Render instance),
-   create a `.env` file inside `client/`:
-   ```bash
-   VITE_API_URL=https://ast-fingerprint-api.onrender.com
-   ```
-   This is also required when deploying to Vercel — set `VITE_API_URL` as an environment
-   variable in the Vercel project settings so the production build points at your live
-   backend instead of `localhost:5000`.
-
----
-
 ## 📡 API Reference
 
 | Endpoint | Method | Description |
