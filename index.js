@@ -1,187 +1,233 @@
 import express from 'express';
 import multer from 'multer';
 import cors from 'cors';
-import Parser from 'tree-sitter';
-import JavaScript from 'tree-sitter-javascript';
-import TypeScript from 'tree-sitter-typescript';
-import Python from 'tree-sitter-python';
-import Css from 'tree-sitter-css';
-import C from 'tree-sitter-c';
-import Cpp from 'tree-sitter-cpp';
-import Java from 'tree-sitter-java';
-import PDFDocument from 'pdfkit';
+import rateLimit from 'express-rate-limit';
+
+import { extensionMap, languageLabels } from './lib/languages.js';
+import { fingerprintSource, calculateJaccardMetrics, getRiskLevel } from './lib/astEngine.js';
+import { generatePairReport, generateBatchReport } from './lib/reportGenerator.js';
 
 const app = express();
+
+// Render (and most PaaS hosts) sit behind a reverse proxy, so Express needs
+// to trust the X-Forwarded-For header to see the real client IP. Without
+// this, express-rate-limit ends up rate-limiting the proxy, not the caller.
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(express.json());
 
-// --- MAP LANGUAGE PARSERS ---
-const languageMap = {
-    'javascript': JavaScript,
-    'typescript': TypeScript.typescript,
-    'python': Python,
-    'css': Css,
-    'c': C,
-    'cpp': Cpp,
-    'java': Java
-};
-
-// --- 3. CONFIGURE MULTER ---
-const codeFileFilter = (req, file, cb) => {
-    const allowedExtensions = ['.js', '.jsx', '.ts', '.tsx', '.py', '.css', '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.java'];
-    const isAllowed = allowedExtensions.some(ext => file.originalname.toLowerCase().endsWith(ext));
-    
-    if (isAllowed) {
-        cb(null, true); 
-    } else {
-        cb(new Error('Invalid file type. Ensure the file matches a supported language format.'), false); 
-    }
-};
-
-const upload = multer({ 
-    storage: multer.memoryStorage(),
-    fileFilter: codeFileFilter,
-    limits: { fileSize: 5 * 1024 * 1024 } 
+// --- RATE LIMITING ---
+// A relaxed limiter across the whole API to stop basic hammering...
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP. Please try again later.' },
 });
 
-// --- 4. AST ENGINE HELPERS ---
-const parser = new Parser();
+// ...and a much stricter limiter specifically on the expensive parsing +
+// PDF-generation endpoints, since those are the ones worth protecting.
+const scanLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Scan limit reached for this IP. Please wait a few minutes before running more scans.' },
+});
 
-function flattenAST(node, typeArray = []) {
-    typeArray.push(node.type);
-    for (let i = 0; i < node.childCount; i++) {
-        flattenAST(node.child(i), typeArray);
-    }
-    return typeArray;
+app.use('/api', generalLimiter);
+
+// --- MULTER CONFIG ---
+const codeFileFilter = (req, file, cb) => {
+  const allAllowedExtensions = Object.values(extensionMap).flat();
+  const isAllowed = allAllowedExtensions.some(ext => file.originalname.toLowerCase().endsWith(ext));
+
+  if (isAllowed) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Ensure the file matches a supported language format.'), false);
+  }
+};
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: codeFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB per file
+    files: 30,                 // hard ceiling for batch uploads
+  },
+});
+
+// --- SHARED HELPERS ---
+function getExtension(filename) {
+  const parts = filename.split('.');
+  return '.' + parts[parts.length - 1].toLowerCase();
 }
 
-function generateNGrams(nodeTypes, n = 3) {
-    const nGrams = new Set();
-    for (let i = 0; i <= nodeTypes.length - n; i++) {
-        const chunk = nodeTypes.slice(i, i + n).join('->');
-        nGrams.add(chunk);
+function validateLanguageFiles(files, reqLang) {
+  const expectedExtensions = extensionMap[reqLang];
+  if (!expectedExtensions) {
+    return 'Unsupported language selected.';
+  }
+  for (const file of files) {
+    const ext = getExtension(file.originalname);
+    if (!expectedExtensions.includes(ext)) {
+      return `Language mismatch! You selected ${reqLang.toUpperCase()}, but "${file.originalname}" doesn't match. Expected: ${expectedExtensions.join(', ')}.`;
     }
-    return nGrams;
+  }
+  return null;
 }
 
-function calculateJaccardMetrics(setA, setB) {
-    let intersectionCount = 0;
-    for (const item of setA) {
-        if (setB.has(item)) {
-            intersectionCount++;
-        }
+function multerErrorHandler(err, req, res, next) {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'One or more files exceed the 5MB size limit.' });
     }
-    const unionCount = setA.size + setB.size - intersectionCount;
-    const similarity = unionCount === 0 ? 1.0 : intersectionCount / unionCount;
-    
-    return {
-        similarityPercentage: (similarity * 100).toFixed(2),
-        intersectionSize: intersectionCount,
-        unionSize: unionCount
-    };
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ error: 'Too many files in one batch. The limit is 30 files per scan.' });
+    }
+    return res.status(400).json({ error: err.message });
+  }
+  if (err) {
+    return res.status(400).json({ error: err.message || 'Upload failed.' });
+  }
+  next();
 }
 
-// --- 5. THE API ENDPOINT ---
-app.post('/api/scan', upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fileB', maxCount: 1 }]), (req, res) => {
+// --- ROUTE: list supported languages (lets the frontend build its dropdown dynamically) ---
+app.get('/api/languages', (req, res) => {
+  res.json({
+    languages: Object.keys(extensionMap).map((value) => ({ value, label: languageLabels[value] })),
+  });
+});
+
+// --- ROUTE: single pair scan (original behaviour, unchanged from the user's point of view) ---
+app.post(
+  '/api/scan',
+  scanLimiter,
+  (req, res, next) => upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fileB', maxCount: 1 }])(req, res, (err) => multerErrorHandler(err, req, res, next)),
+  async (req, res) => {
     if (!req.files || !req.files.fileA || !req.files.fileB) {
-        return res.status(400).json({ error: "Please upload both Source and Suspect files." });
+      return res.status(400).json({ error: 'Please upload both Source and Suspect files.' });
     }
 
     try {
-        const reqLang = req.body.language || 'javascript';
-        
-        const extensionMap = {
-            'javascript': ['.js', '.jsx'],
-            'typescript': ['.ts', '.tsx'],
-            'python': ['.py'],
-            'css': ['.css'],
-            'c': ['.c', '.h'],
-            'cpp': ['.cpp', '.cc', '.cxx', '.hpp'],
-            'java': ['.java']
-        };
+      const reqLang = req.body.language || 'javascript';
+      const fileA = req.files.fileA[0];
+      const fileB = req.files.fileB[0];
 
-        const expectedExtensions = extensionMap[reqLang];
-        
-        const getExtension = (filename) => {
-            const parts = filename.split('.');
-            return '.' + parts[parts.length - 1].toLowerCase();
-        };
+      const validationError = validateLanguageFiles([fileA, fileB], reqLang);
+      if (validationError) {
+        return res.status(400).json({ error: validationError });
+      }
 
-        const extA = getExtension(req.files.fileA[0].originalname);
-        const extB = getExtension(req.files.fileB[0].originalname);
+      const sourceCode = fileA.buffer.toString('utf-8');
+      const suspectCode = fileB.buffer.toString('utf-8');
 
-        if (!expectedExtensions.includes(extA) || !expectedExtensions.includes(extB)) {
-            return res.status(400).json({ 
-                error: `Language mismatch! You selected ${reqLang.toUpperCase()}, but uploaded ${extA} and ${extB} files. Please upload ${expectedExtensions.join(' or ')} files.` 
-            });
-        }
+      const fpA = fingerprintSource(sourceCode, reqLang);
+      const fpB = fingerprintSource(suspectCode, reqLang);
 
-        if (languageMap[reqLang]) {
-            parser.setLanguage(languageMap[reqLang]);
-        } else {
-            return res.status(400).json({ error: "Unsupported language selected." });
-        }
+      const { similarityPercentage, intersectionSize, unionSize } = calculateJaccardMetrics(fpA.nGrams, fpB.nGrams);
 
-        const sourceCode = req.files.fileA[0].buffer.toString('utf-8');
-        const suspectCode = req.files.fileB[0].buffer.toString('utf-8');
+      const pdfBuffer = await generatePairReport({
+        language: reqLang,
+        similarityPercentage,
+        intersectionSize,
+        unionSize,
+        fileAName: fileA.originalname,
+        fileBName: fileB.originalname,
+      });
 
-        const treeA = parser.parse(sourceCode);
-        const treeB = parser.parse(suspectCode);
-
-        const flatA = flattenAST(treeA.rootNode);
-        const flatB = flattenAST(treeB.rootNode);
-
-        const nGramsA = generateNGrams(flatA, 3);
-        const nGramsB = generateNGrams(flatB, 3);
-
-        const { similarityPercentage, intersectionSize, unionSize } = calculateJaccardMetrics(nGramsA, nGramsB);
-
-        // --- Generate PDF Audit Report in Memory ---
-        const doc = new PDFDocument({ margin: 50 });
-        let buffers = [];
-        
-        doc.on('data', buffers.push.bind(buffers));
-        doc.on('end', () => {
-            let pdfData = Buffer.concat(buffers);
-            let base64Pdf = pdfData.toString('base64');
-
-            res.json({
-                success: true,
-                similarity: similarityPercentage,
-                matchedNgrams: intersectionSize,
-                totalNgrams: unionSize,
-                sourceCode: sourceCode,
-                suspectCode: suspectCode,
-                pdfReport: `data:application/pdf;base64,${base64Pdf}`
-            });
-        });
-
-        doc.fontSize(22).fillColor('#10b981').text('AST-Fingerprint Audit Report', { align: 'center' });
-        doc.fontSize(10).fillColor('#666').text(`Generated on: ${new Date().toUTCString()}`, { align: 'center' });
-        doc.moveDown(2);
-
-        doc.fontSize(14).fillColor('#000').text('Plagiarism Analysis Summary');
-        doc.fontSize(11).fillColor('#333');
-        doc.text(`Target Language Engine: ${reqLang.toUpperCase()}`);
-        doc.text(`Similarity Score: ${similarityPercentage}%`);
-        doc.text(`Matched AST N-Grams: ${intersectionSize} / ${unionSize}`);
-        doc.moveDown(2);
-
-        doc.fontSize(14).fillColor('#000').text('File Metadata');
-        doc.fontSize(11).fillColor('#333');
-        doc.text(`Source File: ${req.files.fileA[0].originalname}`);
-        doc.text(`Suspect File: ${req.files.fileB[0].originalname}`);
-        
-        doc.end();
-
+      res.json({
+        success: true,
+        similarity: similarityPercentage,
+        matchedNgrams: intersectionSize,
+        totalNgrams: unionSize,
+        sourceCode,
+        suspectCode,
+        hasSyntaxWarnings: fpA.hasErrors || fpB.hasErrors,
+        pdfReport: `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+      });
     } catch (error) {
-        console.error("Scanning Error:", error);
-        res.status(500).json({ error: "Failed to process the files. Ensure they match the selected language." });
+      console.error('Scanning Error:', error);
+      res.status(500).json({ error: 'Failed to process the files. Ensure they match the selected language.' });
     }
-});
+  }
+);
 
-// --- 6. START SERVER ---
-const PORT = 5000;
+// --- ROUTE: batch scan — all-pairs comparison across N files ---
+app.post(
+  '/api/batch-scan',
+  scanLimiter,
+  (req, res, next) => upload.array('files', 30)(req, res, (err) => multerErrorHandler(err, req, res, next)),
+  async (req, res) => {
+    const files = req.files;
+    if (!files || files.length < 2) {
+      return res.status(400).json({ error: 'Upload at least two files to run a batch comparison.' });
+    }
+
+    try {
+      const reqLang = req.body.language || 'javascript';
+      const validationError = validateLanguageFiles(files, reqLang);
+      if (validationError) {
+        return res.status(400).json({ error: validationError });
+      }
+
+      // Fingerprint every file exactly once...
+      const entries = files.map((file) => {
+        const code = file.buffer.toString('utf-8');
+        const fp = fingerprintSource(code, reqLang);
+        return { name: file.originalname, code, nGrams: fp.nGrams, hasErrors: fp.hasErrors };
+      });
+
+      // ...then compare every unique pair (i < j). N files costs
+      // N*(N-1)/2 comparisons rather than parsing anything twice.
+      const pairs = [];
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const { similarityPercentage, intersectionSize, unionSize } = calculateJaccardMetrics(
+            entries[i].nGrams,
+            entries[j].nGrams
+          );
+          const similarity = parseFloat(similarityPercentage);
+          pairs.push({
+            fileA: entries[i].name,
+            fileB: entries[j].name,
+            similarity,
+            matchedNgrams: intersectionSize,
+            totalNgrams: unionSize,
+            riskLevel: getRiskLevel(similarity),
+          });
+        }
+      }
+
+      pairs.sort((a, b) => b.similarity - a.similarity);
+
+      const pdfBuffer = await generateBatchReport({
+        language: reqLang,
+        filesCount: entries.length,
+        pairs,
+      });
+
+      res.json({
+        success: true,
+        filesCount: entries.length,
+        pairs,
+        sources: Object.fromEntries(entries.map((e) => [e.name, e.code])),
+        syntaxWarnings: entries.filter((e) => e.hasErrors).map((e) => e.name),
+        pdfReport: `data:application/pdf;base64,${pdfBuffer.toString('base64')}`,
+      });
+    } catch (error) {
+      console.error('Batch Scanning Error:', error);
+      res.status(500).json({ error: 'Failed to process the batch. Ensure all files match the selected language.' });
+    }
+  }
+);
+
+// --- START SERVER ---
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`AST-Fingerprint Backend (Core Languages) running on http://localhost:${PORT}`);
+  console.log(`AST-Fingerprint Backend running on http://localhost:${PORT}`);
 });
