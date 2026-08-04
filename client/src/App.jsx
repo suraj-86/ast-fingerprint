@@ -40,17 +40,15 @@ function UploadIcon() {
 }
 
 function App() {
-  const [mode, setMode] = useState('pair'); // 'pair' | 'batch'
+  const [mode, setMode] = useState('pair'); 
   const [language, setLanguage] = useState('javascript');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Pair mode state
   const [fileA, setFileA] = useState(null);
   const [fileB, setFileB] = useState(null);
   const [result, setResult] = useState(null);
 
-  // Batch mode state
   const [batchFiles, setBatchFiles] = useState([]);
   const [batchResult, setBatchResult] = useState(null);
   const [selectedPair, setSelectedPair] = useState(null);
@@ -153,7 +151,6 @@ function App() {
 
   return (
     <div className="app-layout">
-      {/* Top Navigation Bar */}
       <nav className="top-navbar">
         <div className="nav-brand">
           <div className="brand-logo">AST</div>
@@ -165,14 +162,12 @@ function App() {
         </div>
       </nav>
 
-      {/* Main Workspace */}
       <main className="main-workspace">
         <div className="workspace-header">
           <h2>Structural Source Code Plagiarism Detector</h2>
           <p>Mathematical clone detection using Abstract Syntax Trees and N-Gram Hashing.</p>
         </div>
 
-        {/* Mode Toggle */}
         <div className="mode-toggle">
           <button
             className={`mode-btn ${mode === 'pair' ? 'active' : ''}`}
@@ -203,7 +198,6 @@ function App() {
           </select>
         </div>
 
-        {/* --- PAIRWISE MODE --- */}
         {mode === 'pair' && (
           <>
             <div className="upload-section">
@@ -232,7 +226,6 @@ function App() {
           </>
         )}
 
-        {/* --- BATCH MODE --- */}
         {mode === 'batch' && (
           <>
             <div className="batch-upload-box">
@@ -272,7 +265,6 @@ function App() {
 
         {error && <div className="error-msg">{error}</div>}
 
-        {/* --- PAIR RESULT --- */}
         {result && (
           <div className="result-card">
             <div className="result-header">
@@ -331,7 +323,6 @@ function App() {
           </div>
         )}
 
-        {/* --- BATCH RESULT --- */}
         {batchResult && (
           <div className="result-card batch-result-card">
             <div className="result-header">
@@ -426,7 +417,6 @@ function App() {
         )}
       </main>
 
-      {/* Professional Footer */}
       <footer className="app-footer">
         <div className="footer-content">
           <p className="footer-copyright">&copy; {new Date().getFullYear()} Suraj.</p>
